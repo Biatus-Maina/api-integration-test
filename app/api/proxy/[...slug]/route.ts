@@ -13,7 +13,7 @@ function getApiBase(): string {
 async function forward(req: NextRequest, params: { slug?: string[] }) {
   const apiBase = getApiBase();
   const path = (params.slug || []).join("/");
-  const url = `${apiBase}/${path}`;
+  const url = `${apiBase}/${path}${req.nextUrl.search}`;
 
   const headers = new Headers();
 

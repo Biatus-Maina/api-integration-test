@@ -27,6 +27,14 @@ export default function Home() {
   const [uploadLoading, setUploadLoading] = React.useState(false);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
 
+  // Sentences state
+  const [sentenceLang, setSentenceLang] = React.useState("en");
+  const [sentenceLicence, setSentenceLicence] = React.useState("");
+  const [sentenceLimit, setSentenceLimit] = React.useState<number>(1);
+  const [sentences, setSentences] = React.useState<any[] | null>(null);
+  const [sentencesLoading, setSentencesLoading] = React.useState(false);
+  const [sentencesError, setSentencesError] = React.useState<string | null>(null);
+
   async function handleAuth(e: React.FormEvent) {
     e.preventDefault();
     setAuthLoading(true);
@@ -43,10 +51,14 @@ export default function Home() {
   async function fetchLocales() {
     setLocalesLoading(true);
     setLocalesError(null);
-    const { data, error } = await apiClient.getLocales();
+    const { data, error, status } = await apiClient.getLocales();
     setLocalesLoading(false);
     if (error) {
-      setLocalesError(error?.detail || "Failed to load locales");
+      if (status === 404) {
+        setLocalesError("Endpoint not available on this API base. Configure a server that supports /locales.");
+      } else {
+        setLocalesError(error?.detail || "Failed to load locales");
+      }
     } else {
       setLocales(data || []);
       if (!newAudioLocale && data && data.length > 0) setNewAudioLocale(data[0].locale);
@@ -56,9 +68,12 @@ export default function Home() {
   async function fetchAudios() {
     setAudiosLoading(true);
     setAudiosError(null);
-    const { data, error } = await apiClient.getAudios();
+    const { data, error, status } = await apiClient.getAudios();
     setAudiosLoading(false);
-    if (error) setAudiosError(error?.detail || "Failed to load audios");
+    if (error) {
+      if (status === 404) setAudiosError("Endpoint not available on this API base. Configure a server that supports /audio.");
+      else setAudiosError(error?.detail || "Failed to load audios");
+    }
     else setAudios(data || []);
   }
 
@@ -101,6 +116,15 @@ export default function Home() {
     }
   }, [token]);
 
+  async function fetchSentences() {
+    setSentencesLoading(true);
+    setSentencesError(null);
+    const { data, error } = await apiClient.getSentences({ languageCode: sentenceLang, licence: sentenceLicence, limit: sentenceLimit });
+    setSentencesLoading(false);
+    if (error) setSentencesError(error?.detail || "Failed to fetch sentences");
+    else setSentences(data?.data || []);
+  }
+
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-white to-gray-50 dark:from-neutral-950 dark:to-neutral-900 text-gray-900 dark:text-gray-100">
       <div className="max-w-5xl mx-auto px-6 py-10">
@@ -117,6 +141,30 @@ export default function Home() {
           <div className="mt-3 text-sm">
             <div className="truncate"><span className="font-medium">Token:</span> {token ? <span className="text-emerald-600">stored</span> : <span className="text-rose-600">not set</span>}</div>
             {authError && <div className="text-rose-600 mt-1">{authError}</div>}
+          </div>
+        </section>
+
+        <section className="mt-8 rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-neutral-950 p-6 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-medium">Sentences</h2>
+            <button onClick={fetchSentences} disabled={!token || sentencesLoading} className="rounded-md bg-black text-white dark:bg-white dark:text-black px-3 py-1.5 text-sm disabled:opacity-60">Fetch</button>
+          </div>
+          {!token && <p className="text-sm text-gray-600 mt-2">Authenticate to fetch sentences.</p>}
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+            <input className="rounded-md border border-black/10 dark:border-white/10 bg-transparent px-3 py-2" placeholder="languageCode (e.g. luo)" value={sentenceLang} onChange={(e) => setSentenceLang(e.target.value)} />
+            <input className="rounded-md border border-black/10 dark:border-white/10 bg-transparent px-3 py-2" placeholder="Licence (optional, e.g. NOODL)" value={sentenceLicence} onChange={(e) => setSentenceLicence(e.target.value)} />
+            <input type="number" className="rounded-md border border-black/10 dark:border-white/10 bg-transparent px-3 py-2" placeholder="limit" value={sentenceLimit} onChange={(e) => setSentenceLimit(Number(e.target.value) || 1)} />
+          </div>
+          {sentencesError && <p className="text-rose-600 text-sm mt-2">{sentencesError}</p>}
+          <div className="mt-4 space-y-3">
+            {sentences?.map((s) => (
+              <div key={s.id} className="rounded-md border border-black/10 dark:border-white/10 p-3 text-sm">
+                <div className="font-mono text-xs text-gray-500">{s.id}</div>
+                <div className="mt-1">{s.text}</div>
+                <div className="mt-1 text-gray-600 dark:text-gray-400 text-xs">lang: {s.languageCode} • bucket: {s.bucket}</div>
+              </div>
+            ))}
+            {sentences && sentences.length === 0 && <div className="text-sm text-gray-600">No results.</div>}
           </div>
         </section>
 

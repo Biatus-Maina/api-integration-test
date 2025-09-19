@@ -85,6 +85,16 @@ export class ApiClient {
     const res = await this.request(`/audio/${audioId}/file`, { method: "PUT", headers, body: file });
     return res;
   }
+
+  // Text - Sentences
+  getSentences(params: { languageCode: string; licence?: string; limit?: number; offset?: number }) {
+    const sp = new URLSearchParams();
+    sp.set("languageCode", params.languageCode);
+    if (params.licence) sp.set("taxonomy[Licence]", params.licence);
+    if (typeof params.limit === "number") sp.set("limit", String(params.limit));
+    if (typeof params.offset === "number") sp.set("offset", String(params.offset));
+    return this.request<{ data: any[]; meta?: { limit?: number; offset?: number; returned?: number } }>(`/text/sentences?${sp.toString()}`);
+  }
 }
 
 export const apiClient = new ApiClient();
