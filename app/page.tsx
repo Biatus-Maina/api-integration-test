@@ -10,30 +10,26 @@ export default function Home() {
   const [authLoading, setAuthLoading] = React.useState(false);
   const [authError, setAuthError] = React.useState<string | null>(null);
 
-  const [locales, setLocales] = React.useState<Array<{ locale: string; description: string }>>([]);
-  const [localesLoading, setLocalesLoading] = React.useState(false);
-  const [localesError, setLocalesError] = React.useState<string | null>(null);
-
-  const [audios, setAudios] = React.useState<any[]>([]);
-  const [audiosLoading, setAudiosLoading] = React.useState(false);
-  const [audiosError, setAudiosError] = React.useState<string | null>(null);
-
-  const [newAudioText, setNewAudioText] = React.useState("");
-  const [newAudioLocale, setNewAudioLocale] = React.useState("");
-  const [newAudioAge, setNewAudioAge] = React.useState<number | "">("");
-  const [createLoading, setCreateLoading] = React.useState(false);
-  const [createError, setCreateError] = React.useState<string | null>(null);
-  const [createdAudioId, setCreatedAudioId] = React.useState<string | null>(null);
-  const [uploadLoading, setUploadLoading] = React.useState(false);
-  const [uploadError, setUploadError] = React.useState<string | null>(null);
 
   // Sentences state
   const [sentenceLang, setSentenceLang] = React.useState("en");
   const [sentenceLicence, setSentenceLicence] = React.useState("");
   const [sentenceLimit, setSentenceLimit] = React.useState<number>(1);
+  const [sentenceOffset, setSentenceOffset] = React.useState<number>(0);
   const [sentences, setSentences] = React.useState<any[] | null>(null);
   const [sentencesLoading, setSentencesLoading] = React.useState(false);
   const [sentencesError, setSentencesError] = React.useState<string | null>(null);
+  const [sentencesMeta, setSentencesMeta] = React.useState<any>(null);
+  const [responseTime, setResponseTime] = React.useState<number | null>(null);
+  const [testHistory, setTestHistory] = React.useState<Array<{
+    timestamp: string;
+    language: string;
+    offset: number;
+    limit: number;
+    responseTime: number;
+    success: boolean;
+    error?: string;
+  }>>([]);
 
   async function handleAuth(e: React.FormEvent) {
     e.preventDefault();
@@ -48,82 +44,74 @@ export default function Home() {
     setToken(data?.token || null);
   }
 
-  async function fetchLocales() {
-    setLocalesLoading(true);
-    setLocalesError(null);
-    const { data, error, status } = await apiClient.getLocales();
-    setLocalesLoading(false);
-    if (error) {
-      if (status === 404) {
-        setLocalesError("Endpoint not available on this API base. Configure a server that supports /locales.");
-      } else {
-        setLocalesError(error?.detail || "Failed to load locales");
-      }
-    } else {
-      setLocales(data || []);
-      if (!newAudioLocale && data && data.length > 0) setNewAudioLocale(data[0].locale);
-    }
-  }
 
-  async function fetchAudios() {
-    setAudiosLoading(true);
-    setAudiosError(null);
-    const { data, error, status } = await apiClient.getAudios();
-    setAudiosLoading(false);
-    if (error) {
-      if (status === 404) setAudiosError("Endpoint not available on this API base. Configure a server that supports /audio.");
-      else setAudiosError(error?.detail || "Failed to load audios");
-    }
-    else setAudios(data || []);
-  }
 
-  async function createAudio() {
-    setCreateLoading(true);
-    setCreateError(null);
-    const body: any = { text: newAudioText, locale: newAudioLocale };
-    if (newAudioAge !== "") body.age = Number(newAudioAge);
-    const { data, error, raw } = await apiClient.createAudio(body);
-    setCreateLoading(false);
-    if (error) {
-      setCreateError(error?.detail || "Failed to create audio");
-      return;
-    }
-    const location = raw.headers.get("location");
-    const id = data?.id || (location ? location.split("/").pop() : null);
-    setCreatedAudioId(id || null);
-    await fetchAudios();
-  }
-
-  async function removeAudio(id: string) {
-    await apiClient.deleteAudio(id);
-    await fetchAudios();
-  }
-
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || !createdAudioId) return;
-    setUploadLoading(true);
-    setUploadError(null);
-    const { error } = await apiClient.uploadAudioFile(createdAudioId, file);
-    setUploadLoading(false);
-    if (error) setUploadError(error?.detail || "Upload failed");
-  }
-
+  // Reset offset when language or other parameters change
   React.useEffect(() => {
-    if (token) {
-      fetchLocales();
-      fetchAudios();
-    }
-  }, [token]);
+    setSentenceOffset(0);
+  }, [sentenceLang, sentenceLicence, sentenceLimit]);
 
   async function fetchSentences() {
     setSentencesLoading(true);
     setSentencesError(null);
-    const { data, error } = await apiClient.getSentences({ languageCode: sentenceLang, licence: sentenceLicence, limit: sentenceLimit });
+    const startTime = performance.now();
+    
+    const { data, error } = await apiClient.getSentences({ 
+      languageCode: sentenceLang, 
+      licence: sentenceLicence, 
+      limit: sentenceLimit,
+      offset: sentenceOffset 
+    });
+    
+    const endTime = performance.now();
+    const duration = Math.round(endTime - startTime);
+    setResponseTime(duration);
+    
     setSentencesLoading(false);
+    
+    // Record test result
+    const testResult = {
+      timestamp: new Date().toLocaleTimeString(),
+      language: sentenceLang,
+      offset: sentenceOffset,
+      limit: sentenceLimit,
+      responseTime: duration,
+      success: !error,
+      error: error?.detail || undefined
+    };
+    setTestHistory(prev => [testResult, ...prev.slice(0, 9)]); // Keep last 10 tests
+    
     if (error) setSentencesError(error?.detail || "Failed to fetch sentences");
-    else setSentences(data?.data || []);
+    else {
+      setSentences(data?.data || []);
+      setSentencesMeta(data?.meta || null);
+    }
   }
+
+  async function fetchNextSentence() {
+    setSentenceOffset(prev => prev + sentenceLimit);
+    await fetchSentences();
+  }
+
+  function resetSentences() {
+    setSentenceOffset(0);
+    setSentences(null);
+    setSentencesError(null);
+    setSentencesMeta(null);
+    setResponseTime(null);
+  }
+
+  function clearTestHistory() {
+    setTestHistory([]);
+  }
+
+  // Calculate report statistics
+  const totalTests = testHistory.length;
+  const successfulTests = testHistory.filter(t => t.success).length;
+  const failedTests = totalTests - successfulTests;
+  const avgResponseTime = totalTests > 0 ? Math.round(testHistory.reduce((sum, t) => sum + t.responseTime, 0) / totalTests) : 0;
+  const minResponseTime = totalTests > 0 ? Math.min(...testHistory.map(t => t.responseTime)) : 0;
+  const maxResponseTime = totalTests > 0 ? Math.max(...testHistory.map(t => t.responseTime)) : 0;
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-white to-gray-50 dark:from-neutral-950 dark:to-neutral-900 text-gray-900 dark:text-gray-100">
@@ -147,15 +135,38 @@ export default function Home() {
         <section className="mt-8 rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-neutral-950 p-6 shadow-sm">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-medium">Sentences</h2>
-            <button onClick={fetchSentences} disabled={!token || sentencesLoading} className="rounded-md bg-black text-white dark:bg-white dark:text-black px-3 py-1.5 text-sm disabled:opacity-60">Fetch</button>
+            <div className="flex gap-2">
+              <button onClick={fetchSentences} disabled={!token || sentencesLoading} className="rounded-md bg-black text-white dark:bg-white dark:text-black px-3 py-1.5 text-sm disabled:opacity-60">Fetch</button>
+              <button onClick={fetchNextSentence} disabled={!token || sentencesLoading || !sentences} className="rounded-md bg-blue-600 text-white px-3 py-1.5 text-sm disabled:opacity-60">Next Sentence</button>
+              <button onClick={resetSentences} disabled={!sentences} className="rounded-md bg-gray-600 text-white px-3 py-1.5 text-sm disabled:opacity-60">Reset</button>
+            </div>
           </div>
           {!token && <p className="text-sm text-gray-600 mt-2">Authenticate to fetch sentences.</p>}
           <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
             <input className="rounded-md border border-black/10 dark:border-white/10 bg-transparent px-3 py-2" placeholder="languageCode (e.g. luo)" value={sentenceLang} onChange={(e) => setSentenceLang(e.target.value)} />
             <input className="rounded-md border border-black/10 dark:border-white/10 bg-transparent px-3 py-2" placeholder="Licence (optional, e.g. NOODL)" value={sentenceLicence} onChange={(e) => setSentenceLicence(e.target.value)} />
             <input type="number" className="rounded-md border border-black/10 dark:border-white/10 bg-transparent px-3 py-2" placeholder="limit" value={sentenceLimit} onChange={(e) => setSentenceLimit(Number(e.target.value) || 1)} />
+            <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
+              <span>Offset: {sentenceOffset}</span>
+            </div>
           </div>
           {sentencesError && <p className="text-rose-600 text-sm mt-2">{sentencesError}</p>}
+          {(sentencesMeta || responseTime !== null) && (
+            <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-md text-sm">
+              <div className="font-medium text-gray-700 dark:text-gray-300">API Response Info:</div>
+              <div className="mt-1 space-y-1 text-gray-600 dark:text-gray-400">
+                {responseTime !== null && <div>Response time: {responseTime}ms</div>}
+                <div>Returned: {sentencesMeta?.returned || sentences?.length || 0}</div>
+                <div>Limit: {sentencesMeta?.limit || sentenceLimit}</div>
+                <div>Offset: {sentencesMeta?.offset || sentenceOffset}</div>
+                {sentencesMeta && (
+                  <div className="mt-2 text-xs text-gray-500">
+                    Raw metadata: {JSON.stringify(sentencesMeta, null, 2)}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           <div className="mt-4 space-y-3">
             {sentences?.map((s) => (
               <div key={s.id} className="rounded-md border border-black/10 dark:border-white/10 p-3 text-sm">
@@ -168,69 +179,71 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="mt-8 rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-neutral-950 p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-medium">Locales</h2>
-            <button onClick={fetchLocales} disabled={!token || localesLoading} className="rounded-md bg-black text-white dark:bg-white dark:text-black px-3 py-1.5 text-sm disabled:opacity-60">Refresh</button>
-          </div>
-          {!token && <p className="text-sm text-gray-600 mt-2">Authenticate to load locales.</p>}
-          {localesError && <p className="text-rose-600 text-sm mt-2">{localesError}</p>}
-          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {locales.map((l) => (
-              <div key={l.locale} className="rounded-md border border-black/10 dark:border-white/10 px-3 py-2 text-sm flex items-center justify-between">
-                <span className="font-mono">{l.locale}</span>
-                <span className="text-gray-600 dark:text-gray-400">{l.description}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="mt-8 rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-neutral-950 p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-medium">Audio Records</h2>
-            <button onClick={fetchAudios} disabled={!token || audiosLoading} className="rounded-md bg-black text-white dark:bg-white dark:text-black px-3 py-1.5 text-sm disabled:opacity-60">Refresh</button>
-          </div>
-
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
-            <input className="rounded-md border border-black/10 dark:border-white/10 bg-transparent px-3 py-2 md:col-span-2" placeholder="Text" value={newAudioText} onChange={(e) => setNewAudioText(e.target.value)} />
-            <select className="rounded-md border border-black/10 dark:border-white/10 bg-transparent px-3 py-2" value={newAudioLocale} onChange={(e) => setNewAudioLocale(e.target.value)}>
-              <option value="">Select locale</option>
-              {locales.map((l) => (
-                <option key={l.locale} value={l.locale}>{l.locale}</option>
-              ))}
-            </select>
-            <input type="number" className="rounded-md border border-black/10 dark:border-white/10 bg-transparent px-3 py-2" placeholder="Age (optional)" value={newAudioAge} onChange={(e) => setNewAudioAge(e.target.value === "" ? "" : Number(e.target.value))} />
-            <button onClick={createAudio} disabled={!token || createLoading || !newAudioText || !newAudioLocale} className="rounded-md bg-black text-white dark:bg-white dark:text-black px-4 py-2 disabled:opacity-60">{createLoading ? "Creating..." : "Create"}</button>
-          </div>
-          {createError && <p className="text-rose-600 text-sm mt-2">{createError}</p>}
-          {createdAudioId && (
-            <div className="mt-3 text-sm">
-              <div>Created ID: <span className="font-mono">{createdAudioId}</span></div>
-              <label className="mt-2 inline-flex items-center gap-2 text-sm">
-                <span>Upload file:</span>
-                <input type="file" accept="audio/*" onChange={handleFileChange} />
-              </label>
-              {uploadLoading && <span className="ml-2 text-gray-600">Uploading...</span>}
-              {uploadError && <div className="text-rose-600 mt-1">{uploadError}</div>}
+        {totalTests > 0 && (
+          <section className="mt-8 rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-neutral-950 p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-medium">API Test Report</h2>
+              <button onClick={clearTestHistory} className="rounded-md bg-gray-600 text-white px-3 py-1.5 text-sm">Clear History</button>
             </div>
-          )}
+            
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{totalTests}</div>
+                <div className="text-sm text-blue-700 dark:text-blue-300">Total Tests</div>
+              </div>
+              <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                <div className="text-2xl font-bold text-green-600 dark:text-green-400">{successfulTests}</div>
+                <div className="text-sm text-green-700 dark:text-green-300">Successful</div>
+              </div>
+              <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                <div className="text-2xl font-bold text-red-600 dark:text-red-400">{failedTests}</div>
+                <div className="text-sm text-red-700 dark:text-red-300">Failed</div>
+              </div>
+              <div className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+                <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{avgResponseTime}ms</div>
+                <div className="text-sm text-purple-700 dark:text-purple-300">Avg Response</div>
+              </div>
+            </div>
 
-          <div className="mt-6 divide-y divide-black/5 dark:divide-white/10">
-            {audios.map((a) => (
-              <div key={a.id || a.url || Math.random()} className="py-3 flex items-center justify-between text-sm">
-                <div className="flex flex-col">
-                  <span className="font-mono">{a.id || "(no id)"}</span>
-                  <span className="text-gray-600 dark:text-gray-400">{a.text}</span>
+            {totalTests > 1 && (
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Response Time Range</div>
+                  <div className="text-lg font-semibold">{minResponseTime}ms - {maxResponseTime}ms</div>
                 </div>
-                <div className="flex items-center gap-3">
-                  {a.url && <a className="underline" href={a.url} target="_blank" rel="noreferrer">file</a>}
-                  <button onClick={() => removeAudio(a.id)} className="rounded-md border border-black/10 dark:border-white/10 px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/10">Delete</button>
+                <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Success Rate</div>
+                  <div className="text-lg font-semibold">{totalTests > 0 ? Math.round((successfulTests / totalTests) * 100) : 0}%</div>
                 </div>
               </div>
-            ))}
-          </div>
-          {audiosError && <p className="text-rose-600 text-sm mt-2">{audiosError}</p>}
-        </section>
+            )}
+
+            <div className="mt-4">
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Recent Tests</h3>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {testHistory.map((test, index) => (
+                  <div key={index} className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-800 rounded">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${test.success ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                      <span className="font-mono">{test.timestamp}</span>
+                      <span className="text-gray-500">{test.language}</span>
+                      <span className="text-gray-500">offset:{test.offset}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-500">{test.responseTime}ms</span>
+                      {!test.success && test.error && (
+                        <span className="text-red-500 truncate max-w-32" title={test.error}>
+                          {test.error}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
       </div>
     </div>
   );
