@@ -21,6 +21,7 @@ export default function Home() {
   const [sentencesError, setSentencesError] = React.useState<string | null>(null);
   const [sentencesMeta, setSentencesMeta] = React.useState<any>(null);
   const [responseTime, setResponseTime] = React.useState<number | null>(null);
+  const [exportLoading, setExportLoading] = React.useState(false);
   const [testHistory, setTestHistory] = React.useState<Array<{
     timestamp: string;
     language: string;
@@ -30,6 +31,9 @@ export default function Home() {
     success: boolean;
     error?: string;
   }>>([]);
+  const [collecting, setCollecting] = React.useState(false);
+  const collectingRef = React.useRef(false);
+  const collectedKeysRef = React.useRef<Set<string>>(new Set());
 
   async function handleAuth(e: React.FormEvent) {
     e.preventDefault();
@@ -51,17 +55,36 @@ export default function Home() {
     setSentenceOffset(0);
   }, [sentenceLang, sentenceLicence, sentenceLimit]);
 
+  async function tryRefreshToken(): Promise<boolean> {
+    if (!clientId || !clientSecret) return false;
+    const { data, error } = await apiClient.createAccessToken({ clientId, clientSecret });
+    if (error || !data?.token) return false;
+    setToken(data.token);
+    return true;
+  }
+
   async function fetchSentences() {
     setSentencesLoading(true);
     setSentencesError(null);
     const startTime = performance.now();
     
-    const { data, error } = await apiClient.getSentences({ 
+    let res = await apiClient.getSentences({ 
       languageCode: sentenceLang, 
       licence: sentenceLicence, 
       limit: sentenceLimit,
       offset: sentenceOffset 
     });
+    if (!res.data && res.status === 401) {
+      const refreshed = await tryRefreshToken();
+      if (refreshed) {
+        res = await apiClient.getSentences({ 
+          languageCode: sentenceLang, 
+          licence: sentenceLicence, 
+          limit: sentenceLimit,
+          offset: sentenceOffset 
+        });
+      }
+    }
     
     const endTime = performance.now();
     const duration = Math.round(endTime - startTime);
@@ -76,15 +99,15 @@ export default function Home() {
       offset: sentenceOffset,
       limit: sentenceLimit,
       responseTime: duration,
-      success: !error,
-      error: error?.detail || undefined
+      success: !res.error,
+      error: (res.error as any)?.detail || undefined
     };
     setTestHistory(prev => [testResult, ...prev.slice(0, 9)]); // Keep last 10 tests
     
-    if (error) setSentencesError(error?.detail || "Failed to fetch sentences");
+    if (res.error) setSentencesError((res.error as any)?.detail || "Failed to fetch sentences");
     else {
-      setSentences(data?.data || []);
-      setSentencesMeta(data?.meta || null);
+      setSentences(res.data?.data || []);
+      setSentencesMeta(res.data?.meta || null);
     }
   }
 
@@ -103,6 +126,130 @@ export default function Home() {
 
   function clearTestHistory() {
     setTestHistory([]);
+  }
+
+  async function exportAllLuo() {
+    if (!token) return;
+    setExportLoading(true);
+    try {
+      const pageSize = Math.max(1, sentenceLimit || 100);
+      const sp = new URLSearchParams();
+      sp.set("pageSize", String(pageSize));
+      if (sentenceLicence) sp.set("licence", sentenceLicence);
+
+      let res = await fetch(`/api/export/luo?${sp.toString()}`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        const refreshed = await tryRefreshToken();
+        if (refreshed) {
+          res = await fetch(`/api/export/luo?${sp.toString()}`, {
+            headers: { authorization: `Bearer ${apiClient ? ("" as any) : ""}` },
+          });
+          // Above header is redundant; fetch will use updated token via state button handler below
+          res = await fetch(`/api/export/luo?${sp.toString()}`, { headers: { authorization: `Bearer ${localStorage.getItem("cv_token") || token}` } });
+        }
+      }
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        alert(`Export failed: ${res.status} ${detail?.error || ""}`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = res.headers.get("content-disposition")?.split("filename=")[1] || `luo-sentences.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExportLoading(false);
+    }
+  }
+
+  async function startCollectAll() {
+    if (!token) return;
+    setSentencesError(null);
+    setSentences([]);
+    setSentencesMeta(null);
+    setResponseTime(null);
+    collectedKeysRef.current = new Set();
+    setCollecting(true);
+    collectingRef.current = true;
+    let currentOffset = 0;
+    const pageSize = Math.max(1, sentenceLimit || 100);
+    const startedAt = performance.now();
+
+    try {
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        if (!collectingRef.current) break;
+        let res = await apiClient.getSentences({
+          languageCode: sentenceLang,
+          licence: sentenceLicence || undefined,
+          limit: pageSize,
+          offset: currentOffset,
+        });
+        if (!res.data && res.status === 401) {
+          const refreshed = await tryRefreshToken();
+          if (refreshed) {
+            res = await apiClient.getSentences({
+              languageCode: sentenceLang,
+              licence: sentenceLicence || undefined,
+              limit: pageSize,
+              offset: currentOffset,
+            });
+          }
+        }
+        if (res.error) {
+          setSentencesError((res.error as any)?.detail || "Failed to fetch sentences");
+          break;
+        }
+        const batch = res.data?.data || [];
+        const newItems: any[] = [];
+        for (const s of batch) {
+          const key = String((s.text ?? "").trim());
+          if (key && !collectedKeysRef.current.has(key)) {
+            collectedKeysRef.current.add(key);
+            newItems.push(s);
+          }
+        }
+        if (newItems.length > 0) {
+          setSentences((prev) => (prev ? [...prev, ...newItems] : [...newItems]));
+        }
+        if (batch.length < pageSize) {
+          break;
+        }
+        currentOffset += pageSize;
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    } finally {
+      setCollecting(false);
+      collectingRef.current = false;
+      const endedAt = performance.now();
+      setResponseTime(Math.round(endedAt - startedAt));
+    }
+  }
+
+  function stopCollectAll() {
+    collectingRef.current = false;
+    setCollecting(false);
+  }
+
+  function saveCollectedAsJson() {
+    const items = sentences || [];
+    const payload = { count: items.length, languageCode: sentenceLang, licence: sentenceLicence || null, items };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sentences-${sentenceLang}-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   // Calculate report statistics
@@ -139,6 +286,10 @@ export default function Home() {
               <button onClick={fetchSentences} disabled={!token || sentencesLoading} className="rounded-md bg-black text-white dark:bg-white dark:text-black px-3 py-1.5 text-sm disabled:opacity-60">Fetch</button>
               <button onClick={fetchNextSentence} disabled={!token || sentencesLoading || !sentences} className="rounded-md bg-blue-600 text-white px-3 py-1.5 text-sm disabled:opacity-60">Next Sentence</button>
               <button onClick={resetSentences} disabled={!sentences} className="rounded-md bg-gray-600 text-white px-3 py-1.5 text-sm disabled:opacity-60">Reset</button>
+              <button onClick={exportAllLuo} disabled={!token || exportLoading} className="rounded-md bg-emerald-600 text-white px-3 py-1.5 text-sm disabled:opacity-60">{exportLoading ? "Exporting..." : "Export all Luo"}</button>
+              <button onClick={startCollectAll} disabled={!token || collecting} className="rounded-md bg-indigo-600 text-white px-3 py-1.5 text-sm disabled:opacity-60">{collecting ? "Collecting..." : "Fetch all to UI"}</button>
+              <button onClick={stopCollectAll} disabled={!collecting} className="rounded-md bg-rose-600 text-white px-3 py-1.5 text-sm disabled:opacity-60">Stop</button>
+              <button onClick={saveCollectedAsJson} disabled={!sentences || sentences.length === 0 || collecting} className="rounded-md bg-teal-700 text-white px-3 py-1.5 text-sm disabled:opacity-60">Save JSON</button>
             </div>
           </div>
           {!token && <p className="text-sm text-gray-600 mt-2">Authenticate to fetch sentences.</p>}
@@ -151,12 +302,13 @@ export default function Home() {
             </div>
           </div>
           {sentencesError && <p className="text-rose-600 text-sm mt-2">{sentencesError}</p>}
-          {(sentencesMeta || responseTime !== null) && (
+          {(sentencesMeta || responseTime !== null || collecting) && (
             <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-md text-sm">
               <div className="font-medium text-gray-700 dark:text-gray-300">API Response Info:</div>
               <div className="mt-1 space-y-1 text-gray-600 dark:text-gray-400">
                 {responseTime !== null && <div>Response time: {responseTime}ms</div>}
                 <div>Returned: {sentencesMeta?.returned || sentences?.length || 0}</div>
+                {collecting && <div className="text-amber-600">Fetching all pages… showing results as they arrive</div>}
                 <div>Limit: {sentencesMeta?.limit || sentenceLimit}</div>
                 <div>Offset: {sentencesMeta?.offset || sentenceOffset}</div>
                 {sentencesMeta && (

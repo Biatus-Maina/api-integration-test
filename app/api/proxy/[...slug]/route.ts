@@ -1,11 +1,15 @@
 import { NextRequest } from "next/server";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 const SUPPORTED_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH"] as const;
 
 function getApiBase(): string {
   const envBase = process.env.API_BASE || process.env.NEXT_PUBLIC_API_BASE;
   if (!envBase) {
-    throw new Error("API_BASE (or NEXT_PUBLIC_API_BASE) is not set in env");
+    throw new Error("API_BASE (or NEXT_PUBLIC_API_BASE) is not set in env. Configure it in Vercel Environment Variables.");
   }
   return envBase.replace(/\/$/, "");
 }

@@ -31,6 +31,27 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 
 ## Deploy on Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1) Create a project on Vercel and import this repository.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+2) Set Environment Variables in Vercel Project Settings:
+
+- `API_BASE`: Base URL of the Common Voice API (e.g. `https://api.commonvoice.mozilla.org`) used by the server proxy.
+- (Optional) `NEXT_PUBLIC_API_BASE`: If you need to override from the client as well; otherwise proxy uses `API_BASE`.
+
+3) Build & Output
+
+- Framework Preset: Next.js
+- Build Command: `npm run build`
+- Output Directory: `.next`
+- Node.js version: 18 or 20 (default on Vercel)
+
+4) Routes/Functions
+
+- `app/api/proxy/[...slug]/route.ts`: Proxies requests to `API_BASE`. Requires `API_BASE`/`NEXT_PUBLIC_API_BASE`.
+- `app/api/export/luo/route.ts`: Paginates Luo sentences through the proxy and returns a downloadable JSON. Long-running requests may require Pro plan if you increase `maxDuration`.
+
+5) Usage after deploy
+
+- Open the deployed URL, enter Client ID/Secret to get a token.
+- Use “Fetch all to UI” to stream sentences into the page, then “Save JSON”.
+- Or use “Export all Luo” for a direct server-generated JSON download.
