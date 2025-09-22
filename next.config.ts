@@ -1,14 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  experimental: {
-    turbo: {
-      rules: {},
-    },
+  // Use stable Turbopack configuration key (or omit entirely)
+  turbopack: {
+    // place Turbopack options here if needed in the future
   },
-  // Ensure env vars available on server and client where needed
-  // Expose NEXT_PUBLIC_API_BASE if provided
-  env: {},
 };
 
 export default nextConfig;
