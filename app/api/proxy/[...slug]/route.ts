@@ -34,7 +34,7 @@ async function forward(req: NextRequest, params: { slug?: string[] }) {
   const init: RequestInit = {
     method: req.method,
     headers,
-    body: SUPPORTED_METHODS.includes(req.method as any) && req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
+    body: SUPPORTED_METHODS.includes(req.method as typeof SUPPORTED_METHODS[number]) && req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
     // Important to preserve duplex for streaming uploads
     // @ts-expect-error - duplex is a Node extension
     duplex: "half",

@@ -9,7 +9,6 @@ type Sentence = {
   text: string;
   languageCode: string;
   bucket?: string;
-  [key: string]: any;
 };
 
 export async function GET(req: NextRequest) {
@@ -77,7 +76,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-async function safeReadJson(resp: Response): Promise<any> {
+async function safeReadJson(resp: Response): Promise<unknown> {
   try {
     const ct = resp.headers.get("content-type") || "";
     if (ct.includes("application/json")) return await resp.json();

@@ -28,7 +28,7 @@ export class ApiClient {
     return { ...headers, ...(extra || {}) };
   }
 
-  async request<T = unknown>(path: string, options?: { method?: HttpMethod; headers?: HeadersInit; body?: any }): Promise<{ data: T | null; error: any; status: number; raw: Response }> {
+  async request<T = unknown, E = unknown>(path: string, options?: { method?: HttpMethod; headers?: HeadersInit; body?: unknown }): Promise<{ data: T | null; error: E | null; status: number; raw: Response }> {
     const url = `${this.proxyBase}${path.startsWith("/") ? path : `/${path}`}`;
     const method = options?.method || "GET";
     const isJsonBody = options?.body && typeof options.body === "object" && !(options.body instanceof ArrayBuffer) && !(options.body instanceof Blob) && !(options.body instanceof FormData);
@@ -37,10 +37,12 @@ export class ApiClient {
       isJsonBody ? { "content-type": "application/json", ...(options?.headers || {}) } : options?.headers
     );
 
-    const body = isJsonBody ? JSON.stringify(options?.body) : options?.body;
+    const body: BodyInit | undefined = isJsonBody
+      ? JSON.stringify(options?.body)
+      : (options?.body as BodyInit | undefined);
 
     const resp = await fetch(url, { method, headers, body });
-    let data: any = null;
+    let data: unknown = null;
     const contentType = resp.headers.get("content-type") || "";
     if (contentType.includes("application/json")) {
       try {
@@ -52,7 +54,7 @@ export class ApiClient {
       data = await resp.text();
     }
     const ok = resp.ok;
-    return { data: ok ? (data as T) : null, error: ok ? null : data, status: resp.status, raw: resp };
+    return { data: ok ? (data as T) : null, error: ok ? null : (data as E), status: resp.status, raw: resp };
   }
 
   // Auth
@@ -71,7 +73,7 @@ export class ApiClient {
   }
 
   getAudios() {
-    return this.request<Array<any>>("/audio", { method: "GET" });
+    return this.request<Array<Record<string, unknown>>>("/audio", { method: "GET" });
   }
 
   deleteAudio(audioId: string) {
@@ -93,7 +95,7 @@ export class ApiClient {
     if (params.licence) sp.set("taxonomy[Licence]", params.licence);
     if (typeof params.limit === "number") sp.set("limit", String(params.limit));
     if (typeof params.offset === "number") sp.set("offset", String(params.offset));
-    return this.request<{ data: any[]; meta?: { limit?: number; offset?: number; returned?: number } }>(`/text/sentences?${sp.toString()}`);
+    return this.request<{ data: Array<{ id: string; text: string; languageCode: string; bucket?: string }>; meta?: { limit?: number; offset?: number; returned?: number } }, { detail?: string }>(`/text/sentences?${sp.toString()}`);
   }
 }
 

@@ -16,10 +16,11 @@ export default function Home() {
   const [sentenceLicence, setSentenceLicence] = React.useState("");
   const [sentenceLimit, setSentenceLimit] = React.useState<number>(1);
   const [sentenceOffset, setSentenceOffset] = React.useState<number>(0);
-  const [sentences, setSentences] = React.useState<any[] | null>(null);
+  type UISentence = { id: string; text: string; languageCode: string; bucket?: string };
+  const [sentences, setSentences] = React.useState<UISentence[] | null>(null);
   const [sentencesLoading, setSentencesLoading] = React.useState(false);
   const [sentencesError, setSentencesError] = React.useState<string | null>(null);
-  const [sentencesMeta, setSentencesMeta] = React.useState<any>(null);
+  const [sentencesMeta, setSentencesMeta] = React.useState<{ limit?: number; offset?: number; returned?: number } | null>(null);
   const [responseTime, setResponseTime] = React.useState<number | null>(null);
   const [exportLoading, setExportLoading] = React.useState(false);
   const [testHistory, setTestHistory] = React.useState<Array<{
@@ -42,7 +43,9 @@ export default function Home() {
     const { data, error } = await apiClient.createAccessToken({ clientId, clientSecret });
     setAuthLoading(false);
     if (error) {
-      setAuthError(typeof error === "string" ? error : error?.detail || "Failed to get token");
+      const errDetail = (error as { detail?: string } | string | null);
+      const message = typeof errDetail === "string" ? errDetail : errDetail?.detail || "Failed to get token";
+      setAuthError(message);
       return;
     }
     setToken(data?.token || null);
@@ -100,11 +103,11 @@ export default function Home() {
       limit: sentenceLimit,
       responseTime: duration,
       success: !res.error,
-      error: (res.error as any)?.detail || undefined
+      error: (res.error as { detail?: string } | null)?.detail || undefined
     };
     setTestHistory(prev => [testResult, ...prev.slice(0, 9)]); // Keep last 10 tests
     
-    if (res.error) setSentencesError((res.error as any)?.detail || "Failed to fetch sentences");
+    if (res.error) setSentencesError((res.error as { detail?: string } | null)?.detail || "Failed to fetch sentences");
     else {
       setSentences(res.data?.data || []);
       setSentencesMeta(res.data?.meta || null);
@@ -143,11 +146,8 @@ export default function Home() {
       if (res.status === 401) {
         const refreshed = await tryRefreshToken();
         if (refreshed) {
-          res = await fetch(`/api/export/luo?${sp.toString()}`, {
-            headers: { authorization: `Bearer ${apiClient ? ("" as any) : ""}` },
-          });
-          // Above header is redundant; fetch will use updated token via state button handler below
-          res = await fetch(`/api/export/luo?${sp.toString()}`, { headers: { authorization: `Bearer ${localStorage.getItem("cv_token") || token}` } });
+          const latestToken = localStorage.getItem("cv_token") || token || "";
+          res = await fetch(`/api/export/luo?${sp.toString()}`, { headers: { authorization: `Bearer ${latestToken}` } });
         }
       }
       if (!res.ok) {
@@ -183,7 +183,6 @@ export default function Home() {
     const startedAt = performance.now();
 
     try {
-      // eslint-disable-next-line no-constant-condition
       while (true) {
         if (!collectingRef.current) break;
         let res = await apiClient.getSentences({
@@ -204,11 +203,11 @@ export default function Home() {
           }
         }
         if (res.error) {
-          setSentencesError((res.error as any)?.detail || "Failed to fetch sentences");
+          setSentencesError((res.error as { detail?: string } | null)?.detail || "Failed to fetch sentences");
           break;
         }
         const batch = res.data?.data || [];
-        const newItems: any[] = [];
+        const newItems: UISentence[] = [];
         for (const s of batch) {
           const key = String((s.text ?? "").trim());
           if (key && !collectedKeysRef.current.has(key)) {
